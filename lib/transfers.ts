@@ -35,21 +35,21 @@ async function fetchPage(
 
 async function fetchDirection(
   alchemy: Alchemy,
-  params: AssetTransfersParams
-): Promise<AnyTransfer[]> {
+  params: AssetTransfersParams,
+  onPage: (page: AnyTransfer[]) => void
+): Promise<void> {
   // Pagination chains are inherently sequential (each page needs the
   // previous pageKey) and the free tier throttles hard under concurrency,
   // so we drain one chain per direction at a steady, patient pace.
-  const out: AnyTransfer[] = [];
   let pageKey: string | undefined;
   for (;;) {
     const res = await fetchPage(alchemy, params, pageKey);
-    out.push(...(res.transfers || []));
+    const page = res.transfers || [];
+    if (page.length > 0) onPage(page);
     if (!res.pageKey) break;
     pageKey = res.pageKey;
-    await sleep(100);
+    await sleep(250);
   }
-  return out;
 }
 
 export class ValidationError extends Error {}
@@ -73,7 +73,10 @@ function cacheSet(key: string, data: any) {
   cache.set(key, { data, at: Date.now() });
 }
 
-export async function getWalletHistory(rawInput: string) {
+export async function getWalletHistory(
+  rawInput: string,
+  onProgress?: (drained: number) => void
+) {
   const apiKey = process.env.ALCHEMY_API_KEY;
   if (!apiKey) throw new Error("ALCHEMY_API_KEY not configured");
 
@@ -107,9 +110,13 @@ export async function getWalletHistory(rawInput: string) {
   const lower = address.toLowerCase();
 
   // A full drain of a whale wallet takes minutes, so cache the merged
-  // result per address for a while — repeat lookups are instant.
+  // result per address for a while — repeat lookups on the same
+  // server instance are instant.
   const cached = cacheGet(lower);
-  if (cached) return { ...cached, input: rawInput };
+  if (cached) {
+    onProgress?.(cached.total);
+    return { ...cached, input: rawInput };
+  }
 
   const baseParams = {
     withMetadata: true as const,
@@ -118,31 +125,21 @@ export async function getWalletHistory(rawInput: string) {
     category: [...CATEGORIES],
   };
 
-  const [sentTransfers, recvTransfers] = await Promise.all([
-    fetchDirection(alchemy, {
-      ...baseParams,
-      fromAddress: address,
-    } as unknown as AssetTransfersParams),
-    fetchDirection(alchemy, {
-      ...baseParams,
-      toAddress: address,
-    } as unknown as AssetTransfersParams),
-  ]);
-
-  const seen = new Set<string>();
+  // Alchemy can serve overlapping pages when chains run in parallel, so
+  // dedupe incrementally as pages arrive — a Map keyed on the transfer's
+  // natural identity keeps this O(1) per item.
+  const seen = new Map<string, number>();
   const merged: AnyTransfer[] = [];
 
-  const push = (t: AnyTransfer, dir: "SENT" | "RECEIVED") => {
+  const ingest = (t: AnyTransfer, dir: "SENT" | "RECEIVED") => {
     const key = `${t.hash}|${t.category}|${t.asset}|${t.tokenId ?? ""}|${t.blockNum}`;
-    if (seen.has(key)) {
-      const found = merged.find(
-        (m) =>
-          `${m.hash}|${m.category}|${m.asset}|${m.tokenId ?? ""}|${m.blockNum}` === key
-      );
-      if (found && found.direction !== dir) found.direction = "SELF";
+    const existingIdx = seen.get(key);
+    if (existingIdx !== undefined) {
+      const found = merged[existingIdx];
+      if (found.direction !== dir) found.direction = "SELF";
       return;
     }
-    seen.add(key);
+    seen.set(key, merged.length);
     merged.push({
       hash: t.hash,
       blockNum: t.blockNum,
@@ -161,8 +158,30 @@ export async function getWalletHistory(rawInput: string) {
     });
   };
 
-  sentTransfers.forEach((t) => push(t, "SENT"));
-  recvTransfers.forEach((t) => push(t, "RECEIVED"));
+  await Promise.all([
+    fetchDirection(
+      alchemy,
+      {
+        ...baseParams,
+        fromAddress: address,
+      } as unknown as AssetTransfersParams,
+      (page) => {
+        for (const t of page) ingest(t, "SENT");
+        onProgress?.(merged.length);
+      }
+    ),
+    fetchDirection(
+      alchemy,
+      {
+        ...baseParams,
+        toAddress: address,
+      } as unknown as AssetTransfersParams,
+      (page) => {
+        for (const t of page) ingest(t, "RECEIVED");
+        onProgress?.(merged.length);
+      }
+    ),
+  ]);
 
   merged.sort(
     (a, b) => parseInt(b.blockNum, 16) - parseInt(a.blockNum, 16)

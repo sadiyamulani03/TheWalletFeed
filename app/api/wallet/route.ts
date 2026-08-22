@@ -3,28 +3,67 @@ import { getWalletHistory, ValidationError } from "@/lib/transfers";
 
 export const maxDuration = 300;
 
+function buildBody(data: any, limitRaw: string | null) {
+  // The drain always covers every page; `limit` only trims how much of
+  // the merged history is serialized back (keeps payloads sane for UIs).
+  const limit = limitRaw ? Math.max(1, parseInt(limitRaw, 10) || 0) : 0;
+  return limit > 0 && data.transfers.length > limit
+    ? { ...data, transfers: data.transfers.slice(0, limit), returnedCount: limit }
+    : { ...data, returnedCount: data.transfers.length };
+}
+
 export async function GET(req: NextRequest) {
+  const rawInput = req.nextUrl.searchParams.get("address")?.trim() ?? "";
+  if (!rawInput) {
+    return NextResponse.json(
+      { error: "address parameter required" },
+      { status: 400 }
+    );
+  }
+  const streamMode = req.nextUrl.searchParams.get("stream") === "1";
+
   try {
-    const rawInput = req.nextUrl.searchParams.get("address")?.trim() ?? "";
-    if (!rawInput) {
-      return NextResponse.json(
-        { error: "address parameter required" },
-        { status: 400 }
-      );
+    // With stream=1 the route answers immediately and pushes NDJSON lines:
+    // progress events while pages drain, then one final "done" event.
+    if (streamMode) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          const send = (obj: unknown) =>
+            controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+          try {
+            const data = await getWalletHistory(rawInput, (drained) =>
+              send({ type: "progress", drained })
+            );
+            send({ type: "done", data: buildBody(data, req.nextUrl.searchParams.get("limit")) });
+          } catch (err: any) {
+            console.error("API error:", err);
+            const msg = String(err?.message || err);
+            send({
+              type: "error",
+              status: err instanceof ValidationError || /resolve/i.test(msg) ? 400 : 500,
+              message:
+                err instanceof ValidationError || /resolve/i.test(msg)
+                  ? msg.slice(0, 200)
+                  : "Something went wrong on our side — try again in a moment.",
+            });
+          } finally {
+            controller.close();
+          }
+        },
+      });
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "application/x-ndjson; charset=utf-8",
+          "Cache-Control": "no-store",
+        },
+      });
     }
 
     const data = await getWalletHistory(rawInput);
-
-    // The drain always covers every page; `limit` only trims how much of
-    // the merged history is serialized back (keeps payloads sane for UIs).
-    const limitRaw = req.nextUrl.searchParams.get("limit");
-    const limit = limitRaw ? Math.max(1, parseInt(limitRaw, 10) || 0) : 0;
-    const body =
-      limit > 0 && data.transfers.length > limit
-        ? { ...data, transfers: data.transfers.slice(0, limit), returnedCount: limit }
-        : { ...data, returnedCount: data.transfers.length };
-
-    return NextResponse.json(body);
+    return NextResponse.json(
+      buildBody(data, req.nextUrl.searchParams.get("limit"))
+    );
   } catch (err: any) {
     console.error("API error:", err);
     if (err instanceof ValidationError) {

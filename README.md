@@ -50,8 +50,8 @@ npm run cli -- vitalik.eth
 ## 📊 Output Example
 
 ```
-=== Wallet Activity Feed: 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 ===
-Total transfers fetched: 60206 (sent: 526, received: 59656, self: 24)
+=== Wallet Activity Feed: vitalik.eth (0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045) ===
+Total transfers fetched: 317595 (sent: 14624, received: 301466, self: 1505)
 
 Transfer History (most recent first):
 ============================================================
@@ -61,12 +61,17 @@ Transfer History (most recent first):
 
 ===========================================================
 SUMMARY
-Total transfers: 60206
-Sent from address: 526
-Received at address: 59656
-Self-transfers: 24
-Categories: erc20=54888, internal=2987, external=1819, erc721=381, erc1155=131
+Total transfers: 317595
+Sent from address: 14624
+Received at address: 301466
+Self-transfers: 1505
+Categories: erc20=149163, erc721=69757, internal=51517, external=46272, erc1155=886
 ```
+
+Numbers above are from a real full drain of `vitalik.eth`. Whale wallets take a
+few minutes on first lookup because every page of history is fetched — the UI
+streams live progress while it works, and repeat lookups hit the in-process
+cache.
 
 ## 🛠️ Tech Stack
 

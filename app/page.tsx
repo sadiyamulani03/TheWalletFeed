@@ -87,6 +87,7 @@ export default function Home() {
   const [filter, setFilter] = useState("all");
   const [shown, setShown] = useState(PAGE);
   const [lineIdx, setLineIdx] = useState(0);
+  const [drained, setDrained] = useState<number | null>(null);
 
   async function lookup(q?: string) {
     const target = (q ?? query).trim();
@@ -94,19 +95,42 @@ export default function Home() {
     setLoading(true);
     setError("");
     setData(null);
+    setDrained(null);
     try {
       const res = await fetch(
-        `/api/wallet?address=${encodeURIComponent(target)}&limit=5000`
+        `/api/wallet?address=${encodeURIComponent(target)}&limit=5000&stream=1`
       );
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
-      setData(json);
-      setFilter("all");
-      setShown(PAGE);
+      if (!res.ok || !res.body) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || `Request failed (${res.status})`);
+      }
+      // NDJSON stream: progress lines while pages drain, then one done line.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const evt = JSON.parse(line);
+          if (evt.type === "progress") setDrained(evt.drained);
+          else if (evt.type === "error") throw new Error(evt.message);
+          else if (evt.type === "done") {
+            setData(evt.data);
+            setFilter("all");
+            setShown(PAGE);
+          }
+        }
+      }
     } catch (err: any) {
       setError(err.message || "Something went sideways. Try again?");
     } finally {
       setLoading(false);
+      setDrained(null);
     }
   }
 
@@ -162,7 +186,14 @@ export default function Home() {
       {loading && (
         <div className="loading">
           <div className="spinner" />
-          <span>{LOADING_LINES[lineIdx % LOADING_LINES.length]}</span>
+          {drained != null && drained > 0 ? (
+            <span>
+              Drained{" "}
+              <strong>{drained.toLocaleString()}</strong> transfers so far…
+            </span>
+          ) : (
+            <span>{LOADING_LINES[lineIdx % LOADING_LINES.length]}</span>
+          )}
           {lineIdx > 0 && (
             <button
               onClick={() => setLineIdx((i) => i + 1)}
