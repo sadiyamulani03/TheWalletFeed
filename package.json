@@ -1,0 +1,23 @@
+{
+  "name": "thewallet",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "ts-node src/walletActivity.ts",
+    "build": "tsc",
+    "start": "node dist/walletActivity.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/node": "^26.2.0",
+    "alchemy-sdk": "^3.6.5",
+    "dotenv": "^17.4.2",
+    "typescript": "^7.0.2"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2"
+  }
+}
