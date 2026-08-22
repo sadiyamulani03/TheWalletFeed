@@ -1,0 +1,4 @@
+{
+  "framework": "none",
+  "build": "npx tsc"
+}
