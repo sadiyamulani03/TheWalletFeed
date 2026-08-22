@@ -9,35 +9,93 @@ export const CATEGORIES = [
   "specialnft",
 ] as const;
 
-const MAX_PAGES_PER_DIRECTION = 60;
 const ADDR_RE = /^0x[a-fA-F0-9]{40}$/;
+const ENS_RE = /^[a-zA-Z0-9-]{3,}(\.[a-zA-Z0-9-]{2,})+$/;
 
 type AnyTransfer = Record<string, any>;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchPage(
+  alchemy: Alchemy,
+  params: AssetTransfersParams,
+  pageKey?: string
+): Promise<{ transfers: AnyTransfer[]; pageKey?: string }> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await alchemy.core.getAssetTransfers({ ...params, pageKey });
+    } catch (err) {
+      attempt++;
+      if (attempt >= 7) throw err;
+      await sleep(Math.min(1000 * 2 ** (attempt - 1), 15000));
+    }
+  }
+}
 
 async function fetchDirection(
   alchemy: Alchemy,
   params: AssetTransfersParams
-): Promise<{ transfers: AnyTransfer[]; truncated: boolean }> {
+): Promise<AnyTransfer[]> {
+  // Pagination chains are inherently sequential (each page needs the
+  // previous pageKey) and the free tier throttles hard under concurrency,
+  // so we drain one chain per direction at a steady, patient pace.
   const out: AnyTransfer[] = [];
   let pageKey: string | undefined;
-  let pages = 0;
-
-  while (pages < MAX_PAGES_PER_DIRECTION) {
-    const res = await alchemy.core.getAssetTransfers({ ...params, pageKey });
+  for (;;) {
+    const res = await fetchPage(alchemy, params, pageKey);
     out.push(...(res.transfers || []));
+    if (!res.pageKey) break;
     pageKey = res.pageKey;
-    pages++;
-    if (!pageKey) return { transfers: out, truncated: false };
+    await sleep(100);
   }
-  return { transfers: out, truncated: true };
+  return out;
+}
+
+export class ValidationError extends Error {}
+
+type CacheEntry = { data: any; at: number };
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const cache = new Map<string, CacheEntry>();
+
+function cacheGet(key: string): any | null {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return hit.data;
+}
+
+function cacheSet(key: string, data: any) {
+  if (cache.size > 20) cache.clear();
+  cache.set(key, { data, at: Date.now() });
 }
 
 export async function getWalletHistory(rawInput: string) {
   const apiKey = process.env.ALCHEMY_API_KEY;
   if (!apiKey) throw new Error("ALCHEMY_API_KEY not configured");
 
+  // Validate input BEFORE any API call: it must be a well-formed hex
+  // address or a plausible ENS name — nothing else gets through.
+  const input = rawInput.trim();
+  if (ADDR_RE.test(input)) {
+    // valid address, continue below
+  } else if (ENS_RE.test(input)) {
+    // valid ENS-shaped name, resolved after the Alchemy client is created
+  } else if (/^0x/i.test(input)) {
+    throw new ValidationError(
+      "That looks like an attempt at an address but it's malformed — addresses are 0x followed by exactly 40 hex characters."
+    );
+  } else {
+    throw new ValidationError(
+      "Please enter a valid Ethereum address (0x + 40 hex characters) or an ENS name like vitalik.eth."
+    );
+  }
+
   const alchemy = new Alchemy({ apiKey });
-  let address = rawInput;
+  let address = input;
 
   if (!ADDR_RE.test(address)) {
     const name = address.endsWith(".eth") ? address : `${address}.eth`;
@@ -48,6 +106,11 @@ export async function getWalletHistory(rawInput: string) {
 
   const lower = address.toLowerCase();
 
+  // A full drain of a whale wallet takes minutes, so cache the merged
+  // result per address for a while — repeat lookups are instant.
+  const cached = cacheGet(lower);
+  if (cached) return { ...cached, input: rawInput };
+
   const baseParams = {
     withMetadata: true as const,
     order: "desc" as const,
@@ -55,7 +118,7 @@ export async function getWalletHistory(rawInput: string) {
     category: [...CATEGORIES],
   };
 
-  const [sentRes, recvRes] = await Promise.all([
+  const [sentTransfers, recvTransfers] = await Promise.all([
     fetchDirection(alchemy, {
       ...baseParams,
       fromAddress: address,
@@ -98,8 +161,8 @@ export async function getWalletHistory(rawInput: string) {
     });
   };
 
-  sentRes.transfers.forEach((t) => push(t, "SENT"));
-  recvRes.transfers.forEach((t) => push(t, "RECEIVED"));
+  sentTransfers.forEach((t) => push(t, "SENT"));
+  recvTransfers.forEach((t) => push(t, "RECEIVED"));
 
   merged.sort(
     (a, b) => parseInt(b.blockNum, 16) - parseInt(a.blockNum, 16)
@@ -120,7 +183,7 @@ export async function getWalletHistory(rawInput: string) {
     }, {})
   ).map(([category, count]) => ({ category, count }));
 
-  return {
+  const result = {
     input: rawInput,
     address,
     network: "ethereum-mainnet",
@@ -131,7 +194,9 @@ export async function getWalletHistory(rawInput: string) {
     byCategory,
     firstActivity: timestamps[0] ?? null,
     lastActivity: timestamps[timestamps.length - 1] ?? null,
-    truncated: sentRes.truncated || recvRes.truncated,
     transfers: merged,
   };
+
+  cacheSet(lower, result);
+  return result;
 }

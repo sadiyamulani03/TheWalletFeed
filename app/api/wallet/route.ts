@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getWalletHistory } from "@/lib/transfers";
+import { getWalletHistory, ValidationError } from "@/lib/transfers";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,11 +14,24 @@ export async function GET(req: NextRequest) {
     }
 
     const data = await getWalletHistory(rawInput);
-    return NextResponse.json(data);
+
+    // The drain always covers every page; `limit` only trims how much of
+    // the merged history is serialized back (keeps payloads sane for UIs).
+    const limitRaw = req.nextUrl.searchParams.get("limit");
+    const limit = limitRaw ? Math.max(1, parseInt(limitRaw, 10) || 0) : 0;
+    const body =
+      limit > 0 && data.transfers.length > limit
+        ? { ...data, transfers: data.transfers.slice(0, limit), returnedCount: limit }
+        : { ...data, returnedCount: data.transfers.length };
+
+    return NextResponse.json(body);
   } catch (err: any) {
     console.error("API error:", err);
+    if (err instanceof ValidationError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     const msg = String(err?.message || err);
-    if (/resolve|invalid/i.test(msg)) {
+    if (/resolve/i.test(msg)) {
       return NextResponse.json({ error: msg.slice(0, 200) }, { status: 400 });
     }
     return NextResponse.json(

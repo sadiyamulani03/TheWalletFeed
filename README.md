@@ -25,64 +25,67 @@ A Node.js/TypeScript tool that queries a wallet address's complete transfer hist
 
 ```bash
 # Clone the repo
-git clone https://github.com/sadiyamulani03/wallet-activity-feed.git
+git clone https://github.com/sadiyamulani03/TheWalletFeed.git
 
 # Install dependencies
-cd wallet-activity-feed
-npm install
+cd TheWalletFeed
 
-# Set up environment variable
-echo "ALCHEMY_API_KEY=***REMOVED***" > .env
+# Set up environment variable (get your key at alchemy.com)
+echo "ALCHEMY_API_KEY=<your-key-here>" > .env
 
-# Run the script
+# Run the web app locally
 npm run dev
 ```
 
-### Or Run Directly
+### Or Run the CLI
 
 ```bash
-# With Alchemy API key
-ALCHEMY_API_KEY=***REMOVED*** node dist/walletActivity.js
+# With Alchemy API key from .env or environment
+npm run cli -- 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
 
-# Or with custom wallet address
-WALLET_ADDRESS=0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 ALCHEMY_API_KEY=***REMOVED*** node dist/walletActivity.js
+# ENS names work too
+npm run cli -- vitalik.eth
 ```
 
 ## 📊 Output Example
 
 ```
 === Wallet Activity Feed: 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 ===
-Total transfers fetched: 1355 across 1 page(s)
+Total transfers fetched: 60206 (sent: 526, received: 59656, self: 24)
 
 Transfer History (most recent first):
 ============================================================
-2026-08-22 | RECEIVED | ERC20      | $0.0002 | 0x81faa7c1...
-2026-08-22 | RECEIVED | ERC20      | $0.0001 | 0x7e74df42...
+2026-08-22 04:45 UTC | RECEIVED | ERC20   | 12,345.67 USDC | 0x310a80...
+2026-08-21 19:02 UTC | SENT     | ETH     | 0.42 ETH       | 0x9f2b1c...
 ... (and more transfers)
 
-============================================================
+===========================================================
 SUMMARY
-Total transfers: 1355
-Sent from address: 0
-Received at address: 0
-Pages drained: 1
-Address: 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+Total transfers: 60206
+Sent from address: 526
+Received at address: 59656
+Self-transfers: 24
+Categories: erc20=54888, internal=2987, external=1819, erc721=381, erc1155=131
 ```
 
 ## 🛠️ Tech Stack
 
-- **Node.js** - Runtime
-- **TypeScript** - Type safety
-- **Alchemy SDK** - Ethereum API client
+- **Next.js 16 + React 19** - Web app & API route
+- **Node.js + TypeScript** - CLI tool (`src/cli.ts`)
+- **Alchemy SDK** - Transfers API (multi-category, bidirectional, fully paginated)
 - **npm** - Package manager
 
 ## 📦 npm Scripts
 
 | Script | Description |
 |--------|-------------|
-| `npm run dev` | Run with `ts-node` (for development) |
-| `npm run build` | Compile TypeScript to `dist/` |
-| `npm start` | Run compiled `dist/walletActivity.js` |
+| `npm run dev` | Run the Next.js web app locally |
+| `npm run build` | Build the Next.js app |
+| `npm run start` | Start the built Next.js app |
+| `npm run cli -- <addr\|ens>` | Run the CLI tool |
+
+The web app exposes `GET /api/wallet?address=<0x… or name.eth>` returning merged,
+chronologically-sorted JSON for both directions across all transfer categories.
 
 ## 🏆 Road to Devcon I
 

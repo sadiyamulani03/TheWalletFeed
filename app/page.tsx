@@ -26,8 +26,8 @@ type WalletData = {
   byCategory: { category: string; count: number }[];
   firstActivity: string | null;
   lastActivity: string | null;
-  truncated: boolean;
   transfers: Transfer[];
+  returnedCount?: number;
 };
 
 const PAGE = 50;
@@ -95,7 +95,9 @@ export default function Home() {
     setError("");
     setData(null);
     try {
-      const res = await fetch(`/api/wallet?address=${encodeURIComponent(target)}`);
+      const res = await fetch(
+        `/api/wallet?address=${encodeURIComponent(target)}&limit=5000`
+      );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
       setData(json);
@@ -210,8 +212,11 @@ export default function Home() {
                 {data.address.slice(0, 8)}…{data.address.slice(-6)}
               </a>
             </span>
-            {data.truncated && (
-              <span className="addr-chip warn-chip">⚠ we hit our own page cap — there&apos;s even more history out there</span>
+            {data.returnedCount != null && data.returnedCount < data.total && (
+              <span className="addr-chip warn-chip">
+                showing newest {data.returnedCount.toLocaleString()} of{" "}
+                {data.total.toLocaleString()} — stats above cover everything
+              </span>
             )}
           </div>
 

@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "cli:build": "tsc -p tsconfig.cli.json"
+    "cli": "tsx src/cli.ts"
   },
   "keywords": [],
   "author": "Sadiya Mulani",
@@ -23,6 +23,7 @@
   "devDependencies": {
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3"
+    "@types/react-dom": "^19.2.3",
+    "tsx": "^4.23.12"
   }
 }
