@@ -1,4 +1,4 @@
 {
-  "framework": "none",
-  "build": "npx tsc"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build"
 }
