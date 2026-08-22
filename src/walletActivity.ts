@@ -1,7 +1,7 @@
 import { Alchemy } from "alchemy-sdk";
 
 const apiKey = process.env.ALCHEMY_API_KEY;
-const walletAddress = process.env.WALLET_ADDRESS || "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
+const rawWalletAddress = process.env.WALLET_ADDRESS || "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
 if (!apiKey) {
   console.error("ALCHEMY_API_KEY environment variable required");
@@ -10,12 +10,24 @@ if (!apiKey) {
 
 const alchemy = new Alchemy({ apiKey });
 
+async function resolveAddress(address: string): Promise<string> {
+  const addrRe = /^0x[a-fA-F0-9]{40}$/;
+  if (addrRe.test(address)) return address;
+  const resolved = await alchemy.core.resolveName(address);
+  if (!resolved) {
+    console.error(`Could not resolve address: ${address}`);
+    process.exit(1);
+  }
+  return resolved;
+}
+
 async function fetchWalletActivity(address: string) {
   const allTransfers: any[] = [];
   let pageKey: string | undefined;
 
   // Fetch all categories as required by the problem brief
-  const CATEGORIES = ["external", "erc20", "erc721", "erc1155", "internal"];
+  // API supports: external, erc20, erc721, erc1155, internal, specialnft
+  const CATEGORIES = ["external", "erc20", "erc721", "erc1155", "internal", "specialnft"];
 
   let pageCount = 0;
   while (pageCount < 10) {
@@ -77,5 +89,5 @@ async function fetchWalletActivity(address: string) {
   console.log(`Address: ${address}`);
 }
 
-const testAddress = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
-fetchWalletActivity(testAddress).catch(console.error);
+const testAddress = "vitalik.eth";
+resolveAddress(testAddress).then((addr) => fetchWalletActivity(addr)).catch(console.error);
